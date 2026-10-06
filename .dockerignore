@@ -1,0 +1,14 @@
+node_modules
+**/node_modules
+.git
+.npm-cache
+**/.next
+**/.output
+**/.wxt
+**/*.tsbuildinfo
+**/.env
+**/.env.local
+**/.env.*.local
+artifacts
+test-results
+playwright-report

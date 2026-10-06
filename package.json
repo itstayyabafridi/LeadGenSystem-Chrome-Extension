@@ -1,0 +1,33 @@
+{
+  "name": "leadgen-system",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @leadgen/web",
+    "dev:extension": "npm run dev -w @leadgen/extension",
+    "dev:worker": "npm run dev -w @leadgen/worker",
+    "build": "npm run zip:extension && npm run build -w @leadgen/web && npm run build -w @leadgen/worker",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "vitest run",
+    "test:db": "tsx tests/database.integration.ts",
+    "zip:extension": "npm run zip -w @leadgen/extension && node scripts/package-extension.mjs",
+    "test:browser": "playwright test"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
+    "@playwright/test": "^1.63.0",
+    "@types/node": "^24.0.0",
+    "jsdom": "^30.1.2",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0",
+    "vitest": "^4.0.0"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  }
+}

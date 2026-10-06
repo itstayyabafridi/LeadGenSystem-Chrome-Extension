@@ -1,0 +1,16 @@
+node_modules/
+.npm-cache/
+.next/
+.output/
+.wxt/
+dist/
+coverage/
+*.tsbuildinfo
+.env
+.env.local
+.env.*.local
+!*.example
+artifacts/
+playwright-report/
+test-results/
+apps/web/public/downloads/*.zip

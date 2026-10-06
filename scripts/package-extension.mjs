@@ -1,0 +1,11 @@
+import { copyFile, mkdir, readdir } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const output = resolve(root, 'apps/extension/.output');
+const files = (await readdir(output)).filter(file => file.endsWith('-chrome.zip'));
+if (files.length !== 1) throw new Error(`Expected one Chrome extension ZIP, found ${files.length}. Clear old version ZIPs before packaging.`);
+const destination = resolve(root, 'apps/web/public/downloads');
+await mkdir(destination, { recursive: true });
+await copyFile(resolve(output, files[0]), resolve(destination, 'leadgen-extension.zip'));
+console.log('Extension download prepared at apps/web/public/downloads/leadgen-extension.zip');
