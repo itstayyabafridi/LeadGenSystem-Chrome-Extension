@@ -93,6 +93,27 @@ describe('durable extension collection', () => {
     await command({ type: 'RESUME', tabId: 5 });
     expect((fake.store.checkpoint as Checkpoint).job.status).toBe('completed');
   });
+  it('allows stopping after subscription expiry while preserving a local recovery CSV', async () => {
+    await start();
+    const fetcher = globalThis.fetch;
+    vi.stubGlobal('fetch',vi.fn(async (url: string, options: RequestInit) => {
+      if (url.endsWith('/leads')) return Response.json({ error:'subscription_inactive',message:'Subscription expired' },{ status:403 });
+      return fetcher(url,options);
+    }));
+    await expect(command({ type:'RECORD',lead },maps)).rejects.toThrow('Subscription expired');
+    await command({ type:'STOP' });
+    const state = await command<ExtensionState>({ type:'GET_STATE' });
+    expect(state.checkpoint?.job.status).toBe('stopped'); expect(state.unsynced_count).toBe(1);
+    expect(await command<string>({ type:'EXPORT_UNSYNCED' })).toContain('River Dental');
+    expect(serverSaved).toBe(0);
+  });
+  it('preserves unuploaded records when a new collection replaces a finished checkpoint', async () => {
+    await start(); const cp = fake.store.checkpoint as Checkpoint;
+    cp.job.status = 'stopped'; cp.pending = { requestId:'pending-request',lead };
+    await command({ type:'START',business:'Dentists',area:'Lahore',limit:200,tabId:5 });
+    expect((fake.store.checkpoint as Checkpoint).pending).toBeNull();
+    expect(await command<string>({ type:'EXPORT_UNSYNCED' })).toContain('River Dental');
+  });
   it('pauses on tab closure and preserves partial results', async () => {
     await start(); await command({ type: 'RECORD', lead }, maps);
     fake.removed!(5); const state = await command<ExtensionState>({ type: 'GET_STATE' });

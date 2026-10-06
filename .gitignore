@@ -7,8 +7,7 @@ dist/
 coverage/
 *.tsbuildinfo
 .env
-.env.local
-.env.*.local
+.env.*
 !*.example
 artifacts/
 playwright-report/

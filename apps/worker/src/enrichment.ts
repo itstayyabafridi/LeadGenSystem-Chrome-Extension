@@ -1,4 +1,5 @@
 import { lookup } from 'node:dns/promises';
+import type { LookupAddress } from 'node:dns';
 import ipaddr from 'ipaddr.js';
 import { Agent, request } from 'undici';
 import * as cheerio from 'cheerio';
@@ -24,10 +25,16 @@ export function sameWebsite(a: URL, b: URL): boolean {
 export async function fetchHtml(value: string, root?: URL): Promise<{ html: string; url: string }> {
   let url = parseWebsite(value);
   const boundary = root || url;
+  const signal = AbortSignal.timeout(10000);
   for (let redirects = 0; redirects <= 3; redirects++) {
     if (!sameWebsite(boundary, url)) throw new Error('Website redirected outside its domain');
     const hostname = url.hostname.replace(/^\[|\]$/g, '');
-    const records = await lookup(hostname, { all: true });
+    const records = await new Promise<LookupAddress[]>((resolve, reject) => {
+      const abort = () => reject(new Error('Website DNS lookup timed out'));
+      if (signal.aborted) { abort(); return; }
+      signal.addEventListener('abort', abort, { once: true });
+      void lookup(hostname, { all: true }).then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
+    });
     if (!records.length || records.some(r => !isPublicAddress(r.address))) throw new Error('Private website destination');
     const selected = records[0];
     const dispatcher = new Agent({ connect: {
@@ -38,7 +45,7 @@ export async function fetchHtml(value: string, root?: URL): Promise<{ html: stri
     try {
       const response = await request(url, {
         dispatcher,
-        signal: AbortSignal.timeout(10000),
+        signal,
         headersTimeout: 10000,
         bodyTimeout: 10000,
         headers: { 'user-agent': 'LeadGenContactDiscovery/0.1', accept: 'text/html,application/xhtml+xml' },

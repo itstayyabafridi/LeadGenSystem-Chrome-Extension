@@ -79,6 +79,14 @@ describe('actual PostgreSQL migration and transactions', () => {
     expect((await db.query('select * from leads')).rows).toHaveLength(0);
     expect((await db.query('select * from credit_ledger')).rows).toHaveLength(0);
   });
+  it('refreshes contact discovery when a duplicate business changes its website', async () => {
+    const first = await job(); await ingest(first);
+    const task = (await db.query<{ task: { id: string; lease_token: string } }>('select public.claim_enrichment() as task')).rows[0].task;
+    await db.query("select public.control_collection($1,$2,'completed',null,0)", [customer,first]);
+    await ingest(await job(),randomUUID(),customer,'place:ChIJriver',{ ...lead, website: 'https://new-riverside.example' });
+    expect((await db.query<{ result: boolean }>("select public.finish_enrichment($1,$2,'[]','[]',null) as result", [task.id,task.lease_token])).rows[0].result).toBe(false);
+    expect((await db.query<{ state: string; attempts: number }>('select state,attempts from enrichment_tasks')).rows[0]).toEqual({ state: 'pending', attempts: 0 });
+  });
   it('rejects inactive and expired subscriptions', async () => {
     await db.query("update entitlements set expires_at='2000-01-01' where user_id=$1", [customer]);
     await expect(job()).rejects.toThrow('subscription_inactive');

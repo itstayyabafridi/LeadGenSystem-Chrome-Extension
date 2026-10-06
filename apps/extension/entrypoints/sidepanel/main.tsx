@@ -78,7 +78,7 @@ function App() {
         <p className="progress-caption">{count} of {cp.job.lead_limit} businesses</p>
         <div className="counts"><div><strong>{cp.job.saved_count}</strong><span>New leads</span></div><div><strong>{cp.job.duplicate_count}</strong><span>Already saved</span></div><div><strong>{cp.job.skipped_count}</strong><span>Skipped</span></div></div>
         {cp.reason && <p className="reason">{cp.reason}</p>}
-        {cp.pending && <p className="reason">One lead is waiting to sync. Resume to retry.</p>}
+        {cp.pending && active && <p className="reason">One lead is waiting to sync. Resume to retry, or stop and save a recovery CSV.</p>}
         {cp.controlPending && <p className="reason">Collection status is waiting to sync.</p>}
         {active && <div className="controls"><button disabled={busy || (!running && !allowed)} onClick={() => void action(async () => running ? send({ type: 'PAUSE' }) : send({ type: 'RESUME', tabId: await tabId() }))}>{running ? <Pause size={15} /> : <Play size={15} />}{running ? 'Pause' : 'Resume'}</button><button disabled={busy} onClick={() => void action(() => send({ type: 'STOP' }))}><Square size={14} />Stop</button></div>}
         <button className="export" disabled={busy || !count} onClick={() => void action(async () => {
@@ -89,6 +89,13 @@ function App() {
           setNotice('CSV export downloaded.');
         })}><Download size={15} />Export collected leads</button>
       </section>}
+      {!!state.unsynced_count && <div className="notice"><div>{state.unsynced_count} business record(s) are saved locally but have not been confirmed as uploaded.<button className="export" disabled={busy} onClick={() => void action(async () => {
+        const csv = await send<string>({ type: 'EXPORT_UNSYNCED' });
+        const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+        const link = document.createElement('a'); link.href = url; link.download = 'leadgen-recovery.csv'; link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
+        setNotice('Local recovery CSV downloaded. These records may not be in your dashboard.');
+      })}><Download size={14} />Download recovery CSV</button></div></div>}
       <div className="included"><CheckCircle2 size={16} /><p>Public website emails are discovered in the background. View enrichment results in your dashboard.</p></div>
       <a className="dashboard-link" href={WEB} target="_blank" rel="noreferrer">Open your lead dashboard<ArrowUpRight size={15} /></a>
     </>}

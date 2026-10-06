@@ -71,13 +71,14 @@ async function route(request: Request, context: Context): Promise<Response> {
     const q = (url.searchParams.get('q') || '').slice(0, 120).replace(/[^\p{L}\p{N}\s@.+-]/gu, '').trim();
     const job = url.searchParams.get('job');
     if (job) uuid.parse(job);
+    const ratingRaw = url.searchParams.get('rating');
+    const minimumRating = ratingRaw ? z.coerce.number().min(0).max(5).parse(ratingRaw) : null;
     const buildQuery = () => {
       let query = db.from('leads').select(job ? '*,job_leads!inner(job_id)' : '*', { count: 'exact' }).eq('user_id', user.id);
       if (job) query = query.eq('job_leads.job_id', job);
       if (q) query = query.or(`name.ilike.%${q}%,address.ilike.%${q}%,category.ilike.%${q}%`);
       if (url.searchParams.get('email') === 'true') query = query.neq('emails', '[]');
-      const rating = url.searchParams.get('rating');
-      if (rating) query = query.gte('rating', z.coerce.number().min(0).max(5).parse(rating));
+      if (minimumRating !== null) query = query.gte('rating', minimumRating);
       return query;
     };
     if (resource === 'leads/export') {

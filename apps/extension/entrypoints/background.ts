@@ -1,7 +1,7 @@
 import { browser } from 'wxt/browser';
 import { defineBackground } from 'wxt/utils/define-background';
-import { identityKey, isMapsUrl, jobInputSchema, leadInputSchema, searchUrl, type Checkpoint, type ExtensionState, type IngestResult, type Job, type JobStatus, type Session } from '@leadgen/shared';
-import type { ContentCommand, PanelCommand } from '../lib/protocol';
+import { identityKey, isMapsUrl, jobInputSchema, leadInputSchema, leadsToCsv, searchUrl, type Checkpoint, type ExtensionState, type IngestResult, type Job, type JobStatus, type LeadInput, type Session } from '@leadgen/shared';
+import type { ContentCommand, PanelCommand, RecoveryCommand } from '../lib/protocol';
 
 const API = (import.meta.env.WXT_API_URL || 'http://localhost:3000').replace(/\/$/, '');
 class BackendError extends Error { constructor(public code: string, message: string) { super(message); } }
@@ -18,6 +18,21 @@ export default defineBackground(() => {
   };
   const read = async () => await browser.storage.local.get(['session', 'checkpoint']) as { session?: Session; checkpoint?: Checkpoint };
   const save = async (checkpoint: Checkpoint) => { await browser.storage.local.set({ checkpoint }); };
+  type RecoveryRecord = { userId: string; requestId: string; lead: LeadInput };
+  const backups = async () => ((await browser.storage.local.get('unsyncedRecords')).unsyncedRecords || []) as RecoveryRecord[];
+  async function archive(cp: Checkpoint) {
+    if (!cp.pending) return;
+    const records = await backups();
+    if (!records.some(r => r.requestId === cp.pending!.requestId)) {
+      records.push({ userId: cp.job.user_id, requestId: cp.pending.requestId, lead: cp.pending.lead });
+      await browser.storage.local.set({ unsyncedRecords: records });
+    }
+  }
+  async function recoveryLeads(cp: Checkpoint | undefined, accountId: string | undefined) {
+    const records = (await backups()).filter(r => r.userId === accountId);
+    if (cp?.pending && cp.job.user_id === accountId && !records.some(r => r.requestId === cp.pending!.requestId)) records.push({ userId: cp.job.user_id, requestId: cp.pending.requestId, lead: cp.pending.lead });
+    return records.map(r => r.lead);
+  }
   async function raw(path: string, method = 'GET', body?: unknown, token?: string): Promise<Response> {
     let response: Response;
     try {
@@ -76,21 +91,25 @@ export default defineBackground(() => {
     await save(cp);
     return result;
   }
-  async function handle(message: PanelCommand | ContentCommand, sender: { url?: string; tab?: { id?: number } }) {
+  async function handle(message: PanelCommand | ContentCommand | RecoveryCommand, sender: { url?: string; tab?: { id?: number } }) {
     const { checkpoint: cp, session: stored } = await read();
     const fromPanel = sender.url === browser.runtime.getURL('/sidepanel.html');
     const fromMaps = !!sender.url && isMapsUrl(sender.url) && sender.tab?.id === cp?.tabId;
     if (!fromPanel && !fromMaps) throw new Error('This message source is not allowed.');
     if (fromPanel) {
-      const command = message as PanelCommand;
-      if (command.type === 'GET_STATE') return { checkpoint: cp || null, email: stored?.user.email || null, accountId: stored?.user.id || null } satisfies ExtensionState;
+      const command = message as PanelCommand | RecoveryCommand;
+      if (command.type === 'GET_STATE') return { checkpoint: cp || null, email: stored?.user.email || null, accountId: stored?.user.id || null, unsynced_count: (await recoveryLeads(cp, stored?.user.id)).length } satisfies ExtensionState;
+      if (command.type === 'EXPORT_UNSYNCED') {
+        if (!stored) throw new Error('Sign in to download your local recovery records.');
+        return leadsToCsv(await recoveryLeads(cp, stored.user.id));
+      }
       if (command.type === 'LOGIN') {
         const authenticated = await (await raw('auth/login', 'POST', { email: command.email, password: command.password })).json() as Session;
-        if (cp && authenticated.user.id !== cp.job.user_id && (cp.pending || ['running', 'paused'].includes(cp.job.status))) {
+        if (cp && authenticated.user.id !== cp.job.user_id && ['running', 'paused'].includes(cp.job.status)) {
           throw new Error('Finish or stop the current account’s collection before switching accounts.');
         }
         await browser.storage.local.set({ session: authenticated });
-        if (cp && authenticated.user.id !== cp.job.user_id) await browser.storage.local.remove('checkpoint');
+        if (cp && authenticated.user.id !== cp.job.user_id) { await archive(cp); await browser.storage.local.remove('checkpoint'); }
         return { email: authenticated.user.email };
       }
       if (command.type === 'LOGOUT') {
@@ -100,8 +119,9 @@ export default defineBackground(() => {
       }
       if (command.type === 'ACCOUNT') return await api('account');
       if (command.type === 'START') {
-        if (cp?.pending) throw new Error('Resume the previous collection to sync its pending lead before starting another.');
+        if (cp?.pending && ['running','paused'].includes(cp.job.status)) throw new Error('Resume or stop the previous collection before starting another.');
         if (cp?.controlPending) { await syncControl(cp); if (cp.controlPending) throw new Error('Reconnect to sync the previous collection first.'); }
+        if (cp?.pending) await archive(cp);
         const input = jobInputSchema.parse(command);
         const tab = await browser.tabs.get(command.tabId);
         if (!tab.url || !isMapsUrl(tab.url)) throw new Error('Open Google Maps in this tab first.');
@@ -122,7 +142,7 @@ export default defineBackground(() => {
         const tab = await browser.tabs.get(command.tabId);
         if (!tab.url || !isMapsUrl(tab.url)) throw new Error('Open Google Maps before resuming.');
         const remote = await api<Job>(`jobs/${cp.job.id}`);
-        if (['completed','stopped','failed'].includes(remote.status)) { cp.job = remote; await save(cp); throw new Error('This collection was finished from the dashboard.'); }
+        if (['completed','stopped','failed'].includes(remote.status)) { cp.job = remote; cp.reason = remote.reason; cp.controlPending = false; await save(cp); throw new Error('This collection was finished from the dashboard. Any unuploaded business can be downloaded as a recovery CSV.'); }
         await flush(cp);
         if (cp.job.saved_count + cp.job.duplicate_count >= cp.job.lead_limit) {
           await halt(cp, 'completed', 'Requested lead limit reached.');
@@ -138,8 +158,12 @@ export default defineBackground(() => {
       }
       if (command.type === 'PAUSE') { await halt(cp, 'paused', 'Paused by you.'); return cp.job; }
       if (command.type === 'STOP') {
-        // Keep an unacknowledged record until it has been committed before finishing.
-        await flush(cp);
+        try { await flush(cp); }
+        catch (error) {
+          // A rejected write can be kept as a local CSV; an unknown network outcome must be retried.
+          if (!(error instanceof BackendError) || !['subscription_inactive','credits_exhausted','job_not_active','job_is_terminal'].includes(error.code)) throw error;
+          await archive(cp);
+        }
         await halt(cp, 'stopped', 'Stopped by you.');
         return cp.job;
       }

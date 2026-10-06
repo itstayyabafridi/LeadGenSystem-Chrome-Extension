@@ -143,7 +143,7 @@ $$;
 
 create function public.ingest_lead(p_user uuid, p_job uuid, p_request uuid, p_identity text, p_lead jsonb)
 returns jsonb language plpgsql security definer set search_path = public as $$
-declare e public.entitlements; j public.jobs; l public.leads; result jsonb; is_duplicate boolean; linked integer;
+declare e public.entitlements; j public.jobs; l public.leads; result jsonb; is_duplicate boolean; old_website text;
 begin
   -- The account lock serializes charging and duplicate detection across all requests.
   select * into e from public.entitlements where user_id = p_user for update;
@@ -172,13 +172,15 @@ begin
     insert into public.credit_ledger(user_id,delta,reason,lead_id) values(p_user,-1,'New business saved',l.id);
     if l.website is not null then insert into public.enrichment_tasks(lead_id) values(l.id); end if;
   else
+    old_website := l.website;
     update public.leads set name = p_lead->>'name', category = coalesce(p_lead->>'category',category), address = coalesce(p_lead->>'address',address),
       phone = coalesce(p_lead->>'phone',phone), website = coalesce(p_lead->>'website',website), rating = coalesce((p_lead->>'rating')::numeric,rating),
       review_count = coalesce((p_lead->>'review_count')::integer,review_count), hours = coalesce(p_lead->>'hours',hours),
       collected_at = (p_lead->>'collected_at')::timestamptz, updated_at = now() where id = l.id returning * into l;
-    if l.website is not null and l.enrichment_status = 'not_available' then
-      update public.leads set enrichment_status = 'pending' where id = l.id;
-      insert into public.enrichment_tasks(lead_id) values(l.id) on conflict do nothing;
+    if l.website is not null and (l.enrichment_status = 'not_available' or l.website is distinct from old_website) then
+      update public.leads set enrichment_status = 'pending', enrichment_error = null, emails = '[]', socials = '[]' where id = l.id;
+      insert into public.enrichment_tasks(lead_id) values(l.id) on conflict (lead_id) do update
+        set state = 'pending', attempts = 0, next_attempt_at = now(), lease_until = null, lease_token = null, last_error = null;
     end if;
   end if;
   insert into public.job_leads(job_id,lead_id,user_id,duplicate) values(p_job,l.id,p_user,is_duplicate);

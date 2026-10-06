@@ -11,6 +11,14 @@ const lead = {
   enrichment_status: 'completed', enrichment_error: null, created_at: '2026-10-05T10:00:00Z', updated_at: '2026-10-05T10:00:00Z',
 };
 const entitlement = { user_id: userId, active: true, expires_at: '2099-01-01T00:00:00Z', credits: 99 };
+async function expectNoPageOverflow(page: Page) {
+  const size = await page.evaluate(() => ({
+    width: document.documentElement.scrollWidth,
+    viewport: window.innerWidth,
+    overflow: [...document.querySelectorAll<HTMLElement>('body *')].map(e => ({ tag: e.tagName, cls: e.className, right: e.getBoundingClientRect().right })).filter(e => e.right > window.innerWidth + 1).slice(0, 15),
+  }));
+  expect(size.width, JSON.stringify(size.overflow)).toBeLessThanOrEqual(size.viewport);
+}
 async function setup(page: Page, admin = false, empty = false) {
   // Test-only browser fixtures; the application never includes seeded demo leads.
   await page.addInitScript(({ userId }) => {
@@ -44,7 +52,7 @@ test('authentication views work and fit a mobile viewport', async ({ page }) => 
   await page.getByRole('button', { name: 'Forgot your password?' }).click();
   await expect(page.getByRole('button', { name: 'Send reset link' })).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await expectNoPageOverflow(page);
   await mkdir('artifacts', { recursive: true });
   await page.screenshot({ path: 'artifacts/auth-mobile.png', fullPage: true });
 });
@@ -92,9 +100,9 @@ test('admin can edit subscription access and credit grants', async ({ page }) =>
 test('empty library and subscription fit mobile without horizontal page overflow', async ({ page }) => {
   await setup(page, false, true); await page.setViewportSize({ width: 390, height: 844 }); await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Your first lead starts with a search' })).toBeVisible();
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await expectNoPageOverflow(page);
   await page.getByRole('button', { name: 'Subscription', exact: true }).click();
   await expect(page.getByText('Ready for your next search')).toBeVisible();
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await expectNoPageOverflow(page);
   await page.screenshot({ path: 'artifacts/subscription-mobile.png', fullPage: true });
 });

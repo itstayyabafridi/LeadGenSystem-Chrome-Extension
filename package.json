@@ -16,7 +16,7 @@
     "test": "vitest run",
     "test:db": "tsx tests/database.integration.ts",
     "zip:extension": "npm run zip -w @leadgen/extension && node scripts/package-extension.mjs",
-    "test:browser": "playwright test"
+    "test:browser": "npm run build -w @leadgen/extension && playwright test"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.8",

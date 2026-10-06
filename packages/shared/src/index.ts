@@ -60,12 +60,12 @@ export interface Checkpoint {
   startedAt: number;
   controlPending: boolean;
 }
-export interface ExtensionState { checkpoint: Checkpoint | null; accountId: string | null; email: string | null }
+export interface ExtensionState { checkpoint: Checkpoint | null; accountId: string | null; email: string | null; unsynced_count?: number }
 
 export function isMapsUrl(value: string): boolean {
   try {
     const u = new URL(value);
-    return u.protocol === 'https:' && ((u.hostname === 'www.google.com' && u.pathname.startsWith('/maps')) || u.hostname === 'maps.google.com');
+    return u.protocol === 'https:' && ((u.hostname === 'www.google.com' && (u.pathname === '/maps' || u.pathname.startsWith('/maps/'))) || u.hostname === 'maps.google.com');
   } catch { return false; }
 }
 export function searchUrl(business: string, area: string): string {
@@ -93,12 +93,12 @@ export function csvCell(value: unknown): string {
   return `"${s.replace(/"/g, '""')}"`;
 }
 export function leadsToCsv(leads: LeadInput[] | Lead[]): string {
-  const headers = ['Name', 'Category', 'Address', 'Phone', 'Website', 'Rating', 'Review count', 'Hours', 'Maps URL', 'Emails', 'Email sources', 'Social links', 'Collected at'];
+  const headers = ['Name', 'Category', 'Address', 'Phone', 'Website', 'Rating', 'Review count', 'Hours', 'Maps URL', 'Emails', 'Email sources', 'Social links', 'Social sources', 'Collected at'];
   const rows = leads.map(l => {
     const full = l as Partial<Lead>;
     return [l.name, l.category, l.address, l.phone, l.website, l.rating, l.review_count, l.hours, l.maps_url,
       full.emails?.map(c => c.value).join('; '), full.emails?.map(c => c.source_url).join('; '),
-      full.socials?.map(c => c.value).join('; '), l.collected_at].map(csvCell).join(',');
+      full.socials?.map(c => c.value).join('; '), full.socials?.map(c => c.source_url).join('; '), l.collected_at].map(csvCell).join(',');
   });
   return '\uFEFF' + [headers.map(csvCell).join(','), ...rows].join('\r\n');
 }
